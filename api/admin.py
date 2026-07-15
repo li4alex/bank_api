@@ -19,7 +19,7 @@ async def _generate_unique_account_num() -> int:
 async def create_new_account(payload: AccountCreateSchema):
     account_num = await _generate_unique_account_num()
     
-    # Construct the document following your Schema setup
+    # Construct the document following the Schema setup
     new_account_document = {
         "_id": account_num,
         "name": payload.name,
