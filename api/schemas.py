@@ -1,4 +1,6 @@
 from pydantic import BaseModel, Field
+from datetime import datetime
+from typing import Optional
 
 class AccountCreateSchema(BaseModel):
     name: str
@@ -23,3 +25,19 @@ class TransactionSchema(BaseModel):
 class TransferSchema(BaseModel):
     dest_account_num: int
     amount: float = Field(..., gt=0.0)
+
+# The schema used to return transactions to the frontend
+class TransactionResponse(BaseModel):
+    id: int = Field(..., alias="_id")
+    type: str  # "DEPOSIT", "WITHDRAW", "TRANSFER_OUT", "TRANSFER_IN"
+    amount: float
+    timestamp: datetime  # Saved directly in MongoDB as an ISODate
+    description: Optional[str] = None
+    to_account: Optional[int] = Field(None, alias="to")
+    from_account: Optional[int] = Field(None, alias="from")
+
+    class Config:
+        populate_by_name = True
+        json_encoders = {
+            datetime: lambda dt: dt.isoformat()
+        }

@@ -1,4 +1,6 @@
+from datetime import datetime, timezone
 import random
+import uuid
 from fastapi import APIRouter, HTTPException, status
 from api.schemas import AccountCreateSchema
 from database import account_collection, database
@@ -30,7 +32,17 @@ async def create_new_account(payload: AccountCreateSchema):
     
     # Insert safely into MongoDB
     await account_collection.insert_one(new_account_document)
-    
+
+    initial_transaction = {
+        "_id": str(uuid.uuid4()), # Generates a clean, unique transaction ID
+        "account_id": account_num,
+        "type": "DEPOSIT",
+        "amount": float(payload.start_balance),
+        "description": "Initial account opening balance deposit",
+        "timestamp": datetime.now(timezone.utc)
+    }
+    await database.get_collection("transactions").insert_one(initial_transaction)
+
     return {
         "message": f"Account for {payload.name} created successfully.", 
         "account_number": account_num
