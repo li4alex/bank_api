@@ -1,10 +1,25 @@
 from fastapi import APIRouter, status, Depends, HTTPException
 from database import database, account_collection
-from api.schemas import AccountModel, TransactionSchema, TransferSchema
-from api.dependencies import verify_customer_access
+from api.schemas import AccountModel, TokenResponse, TransactionSchema, TransferSchema, LoginRequest
 from datetime import datetime, timezone
+from security import get_current_account, verify_password, create_access_token
+from typing import Annotated
+from fastapi.security import OAuth2PasswordRequestForm
 
 router = APIRouter(prefix="/customer", tags=["Customer Menu"])
+
+@router.post("/login", response_model=TokenResponse)
+async def login(credentials: OAuth2PasswordRequestForm = Depends()):
+    """Authenticate the customer and return a JWT access token."""
+    # Retrieve the account and verify hashed password
+    account_num = int(credentials.username)
+    account = await account_collection.find_one({"_id": account_num})
+    if not account or not verify_password(credentials.password, account["password"]):
+        raise HTTPException(status_code=status.HTTP_401_UNAUTHORIZED, detail="Invalid credentials")
+    
+    # Generate JWT token
+    access_token = create_access_token(data={"sub": str(account_num)})
+    return {"access_token": access_token, "token_type": "bearer"}
 
 @router.get("/{account_num}/details", response_model=AccountModel)
 async def view_account_details(account_num: int):
@@ -12,6 +27,20 @@ async def view_account_details(account_num: int):
     if not account:
         raise HTTPException(status_code=404, detail="Account not found.")
     return account
+
+@router.get("/me")
+async def get_my_profile(current_user: dict = Depends(get_current_account)):
+    """
+    A protected route that only logged-in users can access.
+    Automatically retrieves the user profile based on the JWT bearer token.
+    """
+    return {
+        "account_number": current_user["_id"],
+        "name": current_user["name"],
+        "street_name": current_user["street_name"],
+        "zip_code": current_user["zip_code"],
+        "current_balance": current_user["balance"]
+    }
 
 @router.post("/{account_num}/deposit")
 async def process_deposit(payload: TransactionSchema, account_num: int):
@@ -35,7 +64,7 @@ async def process_deposit(payload: TransactionSchema, account_num: int):
 
     # 4. Update Account Balance
     await account_collection.update_one({"_id": account_num},
-                                        {"$set": {"balance": account["balance"]}})
+                                        {"$set": {"balance": account["balance"] + payload.amount}})
     
     return {
         "message": f"Successfully deposited ${payload.amount:.2f}",
@@ -79,12 +108,6 @@ async def process_withdrawal(
         "description": "Withdrawal via Web Portal"
     }
     tx_result = await database.get_collection("transactions").insert_one(transaction_doc)
-
-    # Update Account Balance
-    await database.get_collection("accounts").update_one(
-        {"_id": account_num},
-        {"$inc": {"balance": -payload.amount}}
-    )
 
     return {
         "message": f"Successfully withdrew ${payload.amount:.2f}",

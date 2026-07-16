@@ -6,8 +6,17 @@ class AccountCreateSchema(BaseModel):
     name: str
     street_name: str
     zip_code: str
+    password: str = Field(..., min_length=6, description="Customer login password")
     start_balance: float = Field(0.0, ge=0.0)
 
+class LoginRequest(BaseModel):
+    account_num: int
+    password: str
+
+class TokenResponse(BaseModel):
+    access_token: str
+    token_type: str
+    
 class AccountModel(BaseModel):
     # Map MongoDB's string-converted structural IDs cleanly to responses
     account_num: int = Field(..., alias="_id")
@@ -18,6 +27,9 @@ class AccountModel(BaseModel):
 
     class Config:
         populate_by_name = True
+
+class CustomerInDB(AccountModel):
+    hashed_password: str
 
 class TransactionSchema(BaseModel):
     amount: float = Field(..., gt=0.0)

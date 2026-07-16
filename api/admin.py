@@ -1,9 +1,12 @@
 from datetime import datetime, timezone
 import random
 import uuid
-from fastapi import APIRouter, HTTPException, status
+from fastapi import APIRouter, HTTPException, status, Depends
 from api.schemas import AccountCreateSchema
 from database import account_collection, database
+from security import get_password_hash, oauth2_scheme
+from fastapi.security import OAuth2PasswordBearer, OAuth2PasswordRequestForm
+from typing import Annotated
 
 # Prefixes all routes in this file with /admin and tags them in /docs automatically
 router = APIRouter(prefix="/admin", tags=["Admin Menu"])
@@ -16,10 +19,28 @@ async def _generate_unique_account_num() -> int:
         existing = await account_collection.find_one({"_id": account_num})
         if not existing:
             return account_num
+        
+# @router.post("/token")
+# async def login(form_data: Annotated[OAuth2PasswordRequestForm, Depends()]):
+#     # Replace this block with real database validation and JWT creation
+#     if form_data.username == "admin" and form_data.password == "secret":
+#         return {"access_token": "dummy-jwt-token-string", "token_type": "bearer"}
+    
+#     raise HTTPException(
+#         status_code=status.HTTP_401_UNAUTHORIZED,
+#         detail="Incorrect username or password",
+#         headers={"WWW-Authenticate": "Bearer"},
+#     )
+
+# @router.get("/items/")
+# async def read_items(token: Annotated[str, Depends(oauth2_scheme)]):
+#     return {"token": token}
 
 @router.post("/accounts", status_code=status.HTTP_201_CREATED)
 async def create_new_account(payload: AccountCreateSchema):
     account_num = await _generate_unique_account_num()
+
+    hashed_password = get_password_hash(payload.password)
     
     # Construct the document following the Schema setup
     new_account_document = {
@@ -27,26 +48,34 @@ async def create_new_account(payload: AccountCreateSchema):
         "name": payload.name,
         "street_name": payload.street_name,
         "zip_code": payload.zip_code,
+        "password": hashed_password,
         "balance": float(payload.start_balance)
     }
     
     # Insert safely into MongoDB
-    await account_collection.insert_one(new_account_document)
+    try:
+        await account_collection.insert_one(new_account_document)
 
-    initial_transaction = {
-        "_id": str(uuid.uuid4()), # Generates a clean, unique transaction ID
-        "account_id": account_num,
-        "type": "DEPOSIT",
-        "amount": float(payload.start_balance),
-        "description": "Initial account opening balance deposit",
-        "timestamp": datetime.now(timezone.utc)
-    }
-    await database.get_collection("transactions").insert_one(initial_transaction)
+        initial_transaction = {
+            "_id": str(uuid.uuid4()), # Generates a clean, unique transaction ID
+            "account_id": account_num,
+            "type": "DEPOSIT",
+            "amount": float(payload.start_balance),
+            "description": "Initial account opening balance deposit",
+            "timestamp": datetime.now(timezone.utc)
+        }
+        await database.get_collection("transactions").insert_one(initial_transaction)
 
-    return {
-        "message": f"Account for {payload.name} created successfully.", 
-        "account_number": account_num
-    }
+        return {
+            "message": f"Account for {payload.name} created successfully.", 
+            "account_number": account_num,
+            "initial_balance": f"${float(payload.start_balance):.2f}"
+        }
+    except Exception as e:
+        raise HTTPException(
+            status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
+            detail=f"Database insertion failed: {str(e)}"
+        )
 
 @router.delete("/accounts/{account_num}")
 async def terminate_account(account_num: int):  # Type hinted to int to prevent string conversions
